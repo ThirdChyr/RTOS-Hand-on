@@ -24,10 +24,10 @@ def Connect(client, userdata, flags, reason_code, properties):
 def Message(client, userdata, msg):
     global Status, Feeding, Wake, Spell, Msg
     StringPayload = msg.payload.decode()
-
-    print("\n")
-    print(f"Topic = {msg.topic}")
-    print(f"Payload = {StringPayload}")
+    if msg.topic != "Translate/ESP32/Word":
+        print("\n")
+        print(f"Topic = {msg.topic}")
+        print(f"Payload = {StringPayload}")
 
     if msg.topic == "Translate/Status":
         if StringPayload == "feed":
