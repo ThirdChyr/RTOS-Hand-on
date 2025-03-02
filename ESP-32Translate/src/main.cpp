@@ -1,3 +1,4 @@
+#include <DFRobotDFPlayerMini.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include <cstdlib>
