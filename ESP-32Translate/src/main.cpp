@@ -2,26 +2,45 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include <cstdlib>
+#include<string.h>
+#include<map>
+
+using std::map;
+using std::string;
+
+map<string,int> TransProtocals =
+{
+  {"Hello",1},
+  {"My",2},
+  {"Name",3},
+  {"Is",4},
+  {"Chayathon",5},
+  {"Rungrueang",6},
+  {"From",7},
+  {"Kasetsartuniversity",8},
+};
 
 #define MQTT_SERVER "20.243.148.107"
 #define MQTT_PORT 1883
 #define MQTT_USERNAME ""
 #define MQTT_PASSWORD ""
 #define MQTT_NAME "ESP_Client"
+#define RXD2 16 
+#define TXD2 17
 
 WiFiClient client;
 PubSubClient mqtt(client);
+HardwareSerial mySerial(2); 
+DFRobotDFPlayerMini myDFPlayer;
 
 const char *ssid = "Iphone";
 const char *pass = "tatty040347";
 bool feed = true;
-String Word[100];
+String Word[100] = {""};
 void ShowMessage(String test)
 {
   char num = test.charAt(0);
   int number = num - '0';
-  // Serial.print("number is");
-  // Serial.print(number);
   int pairing = 0;
   int counting = 0;
   String reload = "";
@@ -51,12 +70,20 @@ void ShowMessage(String test)
   }
   for (int i = 0; i < number; i++)
   {
+    int PointNumber = TransProtocals[Word[i].c_str()];
+    if(myDFPlayer.available())
+    {
+      myDFPlayer.play(PointNumber);
+    }
     Serial.print("Word is ");
     Serial.println(Word[i]);
     delay(1000);
   }
   feed = true;
-  
+  for(int i=0;i<number;i++)
+  {
+    Word[i] = "";
+  }
 }
 void callback(char *topic, byte *payload, unsigned int length)
 {
@@ -80,16 +107,26 @@ void callback(char *topic, byte *payload, unsigned int length)
 void setup()
 {
   Serial.begin(115200);
+  mySerial.begin(9600, SERIAL_8N1, RXD2, TXD2);  
   WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(100);
     Serial.print(".");
   }
+  if (!myDFPlayer.begin(mySerial)) {  
+    Serial.println("DFPlayer Nah ready");
+    while (true);
+    {
+      Serial.print(".");
+    }
+  }
 
-  Serial.printf("Connect sucessfully");
+
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   mqtt.setCallback(callback);
+  myDFPlayer.volume(30);
+
 }
 int newtime = 0;
 void loop()
