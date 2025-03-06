@@ -5,20 +5,7 @@
 #include<string.h>
 #include<map>
 
-using std::map;
 using std::string;
-
-map<string,int> TransProtocals =
-{
-  {"Hello",1},
-  {"My",2},
-  {"Name",3},
-  {"Is",4},
-  {"Chayathon",5},
-  {"Rungrueang",6},
-  {"From",7},
-  {"Kasetsartuniversity",8},
-};
 
 #define MQTT_SERVER "20.243.148.107"
 #define MQTT_PORT 1883
@@ -33,58 +20,74 @@ PubSubClient mqtt(client);
 HardwareSerial mySerial(2); 
 DFRobotDFPlayerMini myDFPlayer;
 
-const char *ssid = "Iphone";
-const char *pass = "tatty040347";
+const char *ssid = "อิอิ";
+const char *pass = "44444444";
 bool feed = true;
 String Word[100] = {""};
+void print_word(int count)
+{
+  for(int i =0;i<count;i++)
+  {
+    Serial.println(Word[i]);
+  }
+}
 void ShowMessage(String test)
 {
-  char num = test.charAt(0);
-  int number = num - '0';
-  int pairing = 0;
-  int counting = 0;
+  std::map<string,int> TransProtocals =
+  {
+    {"Hello",1},
+    {"My",2},
+    {"Name",3},
+    {"Is",4},
+    {"Chayathon",5},
+    {"Rungrueang",6},
+    {"Kasetsartuniversity",7},
+  };
+
+  int number = test.charAt(0) - '0';  
   String reload = "";
+  int counting =0;
   for (int i = 1; i <= test.length(); i++)
   {
-    if (isUpperCase(test.charAt(i)) or i == test.length())
+    if (isUpperCase(test.charAt(i)) || i == test.length())
     {
-      if (pairing == 1)
-      {
-        Word[counting] = reload;
-        reload = "";
-        counting++;
-        reload += test.charAt(i);
-        pairing = 1;
+      if (!reload.isEmpty()) {
+        Word[counting++] = reload;
+        if (counting >= 100) break;  
       }
-      else
-      {
-        pairing++;
-        reload += test.charAt(i);
-
-      }
+      reload = String(test.charAt(i));
     }
     else
     {
       reload += test.charAt(i);
     }
   }
-  for (int i = 0; i < number; i++)
+
+  for (int i = 0; i < number ; i++)
   {
-    int PointNumber = TransProtocals[Word[i].c_str()];
-    if(myDFPlayer.available())
+    if (TransProtocals.find(Word[i].c_str()) != TransProtocals.end())
     {
-      myDFPlayer.play(PointNumber);
+      int PointNumber = TransProtocals[Word[i].c_str()];
+      Serial.println(PointNumber);
+      if (myDFPlayer.available())
+      {
+        myDFPlayer.play(PointNumber);
+        Serial.print("Playing: ");
+        Serial.println(Word[i]);
+        delay(1000);
+      }
     }
-    Serial.print("Word is ");
-    Serial.println(Word[i]);
-    delay(1000);
+    else
+    {
+      Serial.print("Error: No sound file for ");
+      Serial.println(Word[i]);
+    }
   }
+
   feed = true;
-  for(int i=0;i<number;i++)
-  {
-    Word[i] = "";
-  }
+  print_word(counting);
 }
+
 void callback(char *topic, byte *payload, unsigned int length)
 {
   char msg[length + 1];
