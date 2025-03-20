@@ -26,20 +26,19 @@ const char *ssid = "Iphone";
 const char *pass = "tatty040347";
 bool feed = true;
 String Word[100] = {""};
-void backupEEPROM(String value, int length)
+void backupEEPROM(int length)
 {
-  EEPROM.begin(EEPROM_SIZE);
-  for (int i = 0; i < length; i++)
-  {
-    EEPROM.write(i, value[i]);
-  }
+  EEPROM.write(0, length);
   EEPROM.commit();
+  Serial.println(length);
+
 }
 void print_word(int count)
 {
   for (int i = 0; i < count; i++)
   {
     Serial.println(Word[i]);
+
   }
 }
 void OutController(String value)
@@ -68,11 +67,13 @@ void OutController(String value)
           {"ExcuseMe", 20},
           {"Repeat", 999},
       };
-      int number = value.charAt(0) - '0';
+      int number = 0;
       String reload = "";
       int counting = 0;
   if (value != "1Repeat")
   {
+    number = value.charAt(0) - '0';
+    Serial.println("Flow this");
     for (int i = 1; i <= value.length(); i++)
     {
       if (isUpperCase(value.charAt(i)) || i == value.length())
@@ -91,8 +92,16 @@ void OutController(String value)
       }
     }
   }
+  else
+  {
+    number = (int)EEPROM.read(0);
+    Serial.println(number);
+  }
   // // Back up value
-  // backupEEPROM(value, value.length());
+   backupEEPROM(value.length());
+   Serial.println("Backup value");
+   Serial.println(number);
+
   // // backup
 
   for (int i = 0; i < number; i++)
@@ -158,8 +167,10 @@ void callback(char *topic, byte *payload, unsigned int length)
 void setup()
 {
   Serial.begin(115200);
+  delay(1000);
   mySerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
   WiFi.begin(ssid, pass);
+  EEPROM.begin(EEPROM_SIZE);
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(100);
@@ -168,8 +179,7 @@ void setup()
   if (!myDFPlayer.begin(mySerial))
   {
     Serial.println("DFPlayer Nah ready");
-    while (true)
-      ;
+    while (true);
     {
       Serial.print(".");
     }
