@@ -4,8 +4,10 @@
 #include <cstdlib>
 #include <EEPROM.h>
 #include <string.h>
+#include <esp_task_wdt.h>
 #include <map>
 
+// using std::map;
 using std::string;
 
 #define MQTT_SERVER "20.243.148.107"
@@ -13,6 +15,7 @@ using std::string;
 #define MQTT_USERNAME ""
 #define MQTT_PASSWORD ""
 #define MQTT_NAME "ESP_Client"
+#define WDT_TIMEOUT 20 
 #define RXD2 16
 #define TXD2 17
 #define EEPROM_SIZE 1024
@@ -24,25 +27,30 @@ DFRobotDFPlayerMini myDFPlayer;
 
 const char *ssid = "Iphone";
 const char *pass = "tatty040347";
-bool feed = true;
+int count_timer = 0;
+int newtime = 0;
+volatile bool isPlaying = true;
+volatile bool watchdogfeed = false;
 String Word[100] = {""};
+
 void backupEEPROM(int length)
 {
   EEPROM.write(0, length);
   EEPROM.commit();
-  Serial.println(length);
-
+  Serial.println("Save backup value");
+  
 }
 void print_word(int count)
 {
   for (int i = 0; i < count; i++)
   {
-    Serial.println(Word[i]);
-
+    Serial.println("Word : ");
+    Serial.print(Word[i]);
   }
 }
 void OutController(String value)
 {
+  isPlaying = false;
   std::map<string, int> TransProtocals =
       {
           {"Hello", 1},
@@ -67,13 +75,13 @@ void OutController(String value)
           {"ExcuseMe", 20},
           {"Repeat", 999},
       };
-      int number = 0;
-      String reload = "";
-      int counting = 0;
+  int number = 0;
+  String reload = "";
+  int counting = 0;
   if (value != "1Repeat")
   {
     number = value.charAt(0) - '0';
-    Serial.println("Flow this");
+    //Serial.println("Flow this");
     for (int i = 1; i <= value.length(); i++)
     {
       if (isUpperCase(value.charAt(i)) || i == value.length())
@@ -95,12 +103,21 @@ void OutController(String value)
   else
   {
     number = (int)EEPROM.read(0);
-    Serial.println(number);
+  Serial.println("=====================================");
+  Serial.print("Backup value :");
+  Serial.println(number);
+  Serial.println("=====================================");
+
   }
   // // Back up value
-   backupEEPROM(value.length());
-   Serial.println("Backup value");
-   Serial.println(number);
+  backupEEPROM(value.charAt(0) - '0');
+  Serial.println("=====================================");
+  Serial.print("Backup value :");
+  Serial.print(number);
+  Serial.println("");
+  Serial.println("=====================================");
+  Serial.println("Playing Words..........");
+
 
   // // backup
 
@@ -110,14 +127,15 @@ void OutController(String value)
     if (TransProtocals.find(Word[i].c_str()) != TransProtocals.end())
     {
       int PointNumber = TransProtocals[Word[i].c_str()];
-      Serial.println(PointNumber);
+      // Serial.println(PointNumber);
       if (myDFPlayer.available())
       {
         myDFPlayer.play(PointNumber);
-        Serial.print("Playing: ");
+        Serial.print("Playing : ");
+        Serial.print(PointNumber);
         Serial.println(Word[i]);
-        delay(1000);
       }
+      delay(1000);
     }
     else
     {
@@ -126,8 +144,9 @@ void OutController(String value)
     }
   }
 
-  feed = true;
-  print_word(counting);
+  isPlaying = true;
+  Serial.println("Playing Done");
+  Serial.println("=====================================");
 }
 
 void Showsound(int number)
@@ -147,40 +166,51 @@ void Showsound(int number)
 }
 void callback(char *topic, byte *payload, unsigned int length)
 {
+  
   char msg[length + 1];
   memcpy(msg, payload, length);
   msg[length] = '\0';
-
   String topic_str = topic;
   String payload_str = msg;
-  if (topic_str == "Translate/ESP32/Word")
+  if (isPlaying)
   {
-    Serial.println("[" + topic_str + "]: " + payload_str);
-  }
-  if (topic_str == "Translate/ESP32/Word")
-  {
-    feed = false;
-    OutController(payload_str);
+    if (topic_str == "Translate/ESP32/Word")
+    {
+      // feed = false;
+      Serial.println("[" + topic_str + "]: " + payload_str);
+      OutController(payload_str);
+    }
   }
 }
 
 void setup()
 {
   Serial.begin(115200);
-  delay(1000);
-  mySerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
+  delay(2000);
+  Serial.println("Start Connect WiFi");
   WiFi.begin(ssid, pass);
+  Serial.println("Out Flow WIFI");
+
+  esp_task_wdt_deinit();
+  esp_task_wdt_init(WDT_TIMEOUT, true); 
+  esp_task_wdt_add(NULL); 
+
+  mySerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
   EEPROM.begin(EEPROM_SIZE);
+
   while (WiFi.status() != WL_CONNECTED)
   {
-    delay(100);
+    delay(1000);
+    //esp_task_wdt_reset();
     Serial.print(".");
   }
+  Serial.println("WiFi Connected");
   if (!myDFPlayer.begin(mySerial))
   {
     Serial.println("DFPlayer Nah ready");
-    while (true);
+    while (true)
     {
+      ESP.restart();
       Serial.print(".");
     }
   }
@@ -189,7 +219,6 @@ void setup()
   mqtt.setCallback(callback);
   myDFPlayer.volume(30);
 }
-int newtime = 0;
 void loop()
 {
   long int realtime = millis();
@@ -208,14 +237,28 @@ void loop()
     }
   }
   mqtt.loop();
-  if (realtime - newtime >= 10000)
+
+  if ((realtime - newtime >= 7000) and isPlaying)
   {
+    count_timer++;
     newtime = realtime;
-    if (feed)
+
+    if (mqtt.connected())
     {
       String status = "feed";
+      esp_task_wdt_reset();
       mqtt.publish("Translate/Status", status.c_str());
-      Serial.println("Sending sucessfully!!");
+
+      Serial.println("Normally feeding");
+    }
+    else if(mqtt.connected())
+    {
+      Serial.println("Not feeding waiting to reset");
+    }
+    else
+    {
+      Serial.println("playing");
+      esp_task_wdt_reset();
     }
   }
 }
