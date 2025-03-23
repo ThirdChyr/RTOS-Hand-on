@@ -22,7 +22,7 @@ using std::string;
 #define TXD2 17
 
 #define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 32
+#define SCREEN_HEIGHT 64
 
 #define EEPROM_SIZE 1024
 #define WDT_TIMEOUT 20
@@ -42,6 +42,29 @@ HardwareSerial mySerial(2);
 DFRobotDFPlayerMini myDFPlayer;
 Adafruit_SSD1306 display(SCREEN_WIDTH,SCREEN_HEIGHT, &Wire);
 
+void ShowOled(String value,String Now_value,String Backup)
+{
+  display.clearDisplay();
+  display.setTextSize(0.7);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("Status : ");
+  display.setCursor(50, 0);
+  display.println(value);
+  display.setCursor(0, 20);
+  display.println("Show : ");
+  display.setCursor(50, 20);
+  display.setTextSize(0.3);
+  display.println(Now_value);
+  display.setTextSize(0.7);
+  display.setCursor(0, 40);
+  display.println("Backup : ");
+  display.setCursor(50, 40);
+  display.setTextSize(0.3);
+  display.println(Backup);
+
+  display.display();
+}
 String get_backup()
 {
   int start = 0;
@@ -52,7 +75,7 @@ String get_backup()
   {
     value += (char)EEPROM.read(start + i);
   }
-  Serial.println("Backup value: " + value);
+  //Serial.println("Backup value: " + value);
   return value;
 }
 void EEPORM_Backup(String value)
@@ -143,12 +166,12 @@ void Callbackfunc(char *topic, byte *payload, unsigned int length)
   msg[length] = '\0';
   String topic_str = topic;
   String payload_str = msg;
-
   bool StatusDone = false;
   xQueuePeek(Mailbox_status, &StatusDone, 0);
 
   if (topic_str == "Translate/ESP32/Word" && !StatusDone && payload_str != "1Repeat")
   {
+    ShowOled("Playing",payload_str,get_backup());
     Serial.println("[" + topic_str + "]: " + payload_str);
     bool status = true;
     EEPORM_Backup(payload_str);
@@ -157,7 +180,7 @@ void Callbackfunc(char *topic, byte *payload, unsigned int length)
   }
   else if(topic_str == "Translate/ESP32/Word" && payload_str == "1Repeat")
   {
-   
+    ShowOled("Playing",payload_str,get_backup());
       bool status = true;
       String word = get_backup();
       ExtractWord(word);
@@ -230,13 +253,13 @@ void ControlPlane(void *pvParameters)
   {
     if (xQueuePeek(Mailbox_status, &status, 0) == pdTRUE && status)
     {
-
       xTaskCreate(Sound_and_Oled,"ProcessData",4096,NULL,1,&SoundOled);
-      vTaskDelay(pdMS_TO_TICKS(5000));
+      vTaskDelay(pdMS_TO_TICKS(1000));
 
       status = false;
       xQueueOverwrite(Mailbox_status, &status);
       Serial.println("System unlocked - Ready for new data");
+      ShowOled("Idle","",get_backup());
     }
     vTaskDelay(pdMS_TO_TICKS(100));
   }
@@ -247,6 +270,7 @@ void setup()
   Serial.begin(115200);
   delay(2000);
   EEPROM.begin(EEPROM_SIZE);
+
   esp_task_wdt_deinit();
   esp_task_wdt_init(WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
@@ -256,8 +280,12 @@ void setup()
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(1000);
-    esp_task_wdt_reset();
     Serial.print(".");
+  }
+
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) 
+  {
+    Serial.println(F("SSD1306 allocation failed"));
   }
 
   if (!myDFPlayer.begin(mySerial))
