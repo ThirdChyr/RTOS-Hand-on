@@ -1,11 +1,16 @@
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
+#include <Adafruit_SSD1306.h>
 #include <esp_task_wdt.h>
 #include <freertos/task.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include <freertos/timers.h>
 #include <DFRobotDFPlayerMini.h>
+#include <map>
+#include <EEPROM.h>
+
+using std::string;
 
 #define MQTT_SERVER "20.243.148.107"
 #define MQTT_PORT 1883
@@ -35,7 +40,40 @@ WiFiClient client;
 PubSubClient mqtt(client);
 HardwareSerial mySerial(2);
 DFRobotDFPlayerMini myDFPlayer;
+Adafruit_SSD1306 display(SCREEN_WIDTH,SCREEN_HEIGHT, &Wire);
 
+String get_backup()
+{
+  int start = 0;
+  int word_lenght = EEPROM.read(start);
+  start++;
+  String value = "";
+  for (int i = 0; i < word_lenght; i++)
+  {
+    value += (char)EEPROM.read(start + i);
+  }
+  Serial.println("Backup value: " + value);
+  return value;
+}
+void EEPORM_Backup(String value)
+{
+  int start = 0;
+  int word_lenght = value.length();
+  EEPROM.write(start, word_lenght);
+  start++;
+  for (int i = 0; i < word_lenght; i++)
+  {
+    EEPROM.write(start + i, value.charAt(i));
+  }
+  if(EEPROM.commit())
+  {
+    Serial.println("Backup Done");
+  }
+  else
+  {
+    Serial.println("Backup Failed");
+  }
+}
 void print_word(int count)
 {
   for (int i = 0; i < count; i++)
@@ -109,12 +147,21 @@ void Callbackfunc(char *topic, byte *payload, unsigned int length)
   bool StatusDone = false;
   xQueuePeek(Mailbox_status, &StatusDone, 0);
 
-  if (topic_str == "Translate/ESP32/Word" && !StatusDone)
+  if (topic_str == "Translate/ESP32/Word" && !StatusDone && payload_str != "1Repeat")
   {
     Serial.println("[" + topic_str + "]: " + payload_str);
     bool status = true;
+    EEPORM_Backup(payload_str);
     ExtractWord(payload_str);
     xQueueOverwrite(Mailbox_status, &status);
+  }
+  else if(topic_str == "Translate/ESP32/Word" && payload_str == "1Repeat")
+  {
+   
+      bool status = true;
+      String word = get_backup();
+      ExtractWord(word);
+      xQueueOverwrite(Mailbox_status, &status);
   }
   else if (topic_str == "Translate/Status" && payload_str == "feed")
   {
@@ -125,10 +172,54 @@ void Callbackfunc(char *topic, byte *payload, unsigned int length)
     Serial.println("System is busy processing previous data");
   }
 }
-void Sound_and_Oled(void *message)
+void Sound_and_Oled(void *pvParameters)
 {
-  
+  int count = 0;
+  String word ;
+  std::map<string, int> TransProtocals =
+      {
+          {"Hello", 4},
+          {"Good", 1},
+          {"Bad", 2},
+          {"I", 3},
+          {"Repeat", 5},
+      };
+
+  while (1)
+  {
+    if (xQueueReceive(Data_Queue, &word, 0) == pdTRUE)
+    {
+      count = word.toInt();
+      Serial.println("Playing Words..........");
+      for (int i = 0; i < count; i++)
+      {
+        if(xQueueReceive(Data_Queue, &word, 0) == pdTRUE)
+        {
+          string stdWord = string(word.c_str());
+          if(TransProtocals.find(stdWord) != TransProtocals.end())
+          {
+            int pointnumber = TransProtocals[stdWord];
+            if(myDFPlayer.available())
+            {
+              Serial.printf("Playing sound %d for word: %s\n", pointnumber, word.c_str());
+              myDFPlayer.play(pointnumber);
+            }
+            else
+            {
+              Serial.println("DFPlayer is not available");
+            }
+          }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+      }
+      Serial.println("Playing Done");
+      vTaskDelete(SoundOled);
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
 }
+ 
+
 void ControlPlane(void *pvParameters)
 {
   int planetimer = 0;
@@ -155,7 +246,7 @@ void setup()
 {
   Serial.begin(115200);
   delay(2000);
-
+  EEPROM.begin(EEPROM_SIZE);
   esp_task_wdt_deinit();
   esp_task_wdt_init(WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
@@ -169,8 +260,19 @@ void setup()
     Serial.print(".");
   }
 
+  if (!myDFPlayer.begin(mySerial))
+  {
+    Serial.println("DFPlayer Nah ready");
+    while (true)
+    {
+      Serial.print(".");
+      delay(1000);
+    }
+  }
+
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   mqtt.setCallback(Callbackfunc);
+  myDFPlayer.volume(30);
 
   Data_Queue = xQueueCreate(100, MAX_WORD_LENGTH);
   Mailbox_status = xQueueCreate(1, sizeof(bool));
