@@ -1,5 +1,6 @@
 #include <DFRobotDFPlayerMini.h>
 #include <PubSubClient.h>
+#include <Adafruit_SSD1306.h>
 #include <WiFi.h>
 #include <cstdlib>
 #include <EEPROM.h>
@@ -18,11 +19,14 @@ using std::string;
 #define RXD2 16
 #define TXD2 17
 #define EEPROM_SIZE 1024
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 32
 
 WiFiClient client;
 PubSubClient mqtt(client);
 HardwareSerial mySerial(2);
 DFRobotDFPlayerMini myDFPlayer;
+Adafruit_SSD1306 display(SCREEN_WIDTH,SCREEN_HEIGHT, &Wire);
 
 const char *ssid = "Iphone";
 const char *pass = "tatty040347";
@@ -39,6 +43,32 @@ void backupEEPROM(int length)
   Serial.println("Save backup value");
 }
 
+void ShowOled(String value)
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(40, 0);
+  display.println("Status");
+  display.setCursor(40, 10);
+  display.println(value);
+  display.display();
+}
+void Showsound(int number)
+{
+  if (myDFPlayer.available())
+  {
+    myDFPlayer.play(number);
+    Serial.print("Playing: ");
+    Serial.println(number);
+
+  }
+  else
+  {
+    Serial.print("Error: No sound file for ");
+    Serial.println(number);
+  }
+}
 void print_word(int count)
 {
   for (int i = 0; i < count; i++)
@@ -52,13 +82,15 @@ void print_word(int count)
 
 void OutController(String value)
 {
+  ShowOled("Playing....");
+  Serial.println(value);
   isPlaying = false;
   std::map<string, int> TransProtocals =
       {
-          {"Hello", 1},
-          {"Good", 2},
-          {"Bad", 3},
-          {"I", 4},
+          {"Hello", 4},
+          {"Good", 1},
+          {"Bad", 2},
+          {"I", 3},
           {"Repeat", 5},
       };
 
@@ -109,20 +141,15 @@ void OutController(String value)
   Serial.println("");
   Serial.println("=====================================");
   Serial.println("Playing Words..........");
-
+  print_word(number);
   for (int i = 0; i < number; i++)
   {
     if (TransProtocals.find(Word[i].c_str()) != TransProtocals.end())
     {
-      int PointNumber = TransProtocals[Word[i].c_str()];
       if (myDFPlayer.available())
       {
-        Serial.print("Playing file: ");
-        Serial.print(PointNumber);
-        Serial.print(" - ");
-        Serial.println(Word[i]);
-
-        myDFPlayer.play(PointNumber);
+        int PointNumber = TransProtocals[Word[i].c_str()];
+        Showsound(PointNumber);
       }
       else
       {
@@ -139,23 +166,11 @@ void OutController(String value)
 
   isPlaying = true;
   Serial.println("Playing Done");
+  ShowOled("Done....");
   Serial.println("=====================================");
 }
 
-void Showsound(int number)
-{
-  if (myDFPlayer.available())
-  {
-    myDFPlayer.play(number);
-    Serial.print("Playing: ");
-    Serial.println(number);
-  }
-  else
-  {
-    Serial.print("Error: No sound file for ");
-    Serial.println(number);
-  }
-}
+
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
@@ -170,6 +185,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     if (topic_str == "Translate/ESP32/Word")
     {
       Serial.println("[" + topic_str + "]: " + payload_str);
+      ShowOled("Get Word....");
       OutController(payload_str);
     }
   }
@@ -191,6 +207,9 @@ void setup()
   mySerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
   EEPROM.begin(EEPROM_SIZE);
 
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+  }
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(1000);
@@ -244,10 +263,12 @@ void loop()
       esp_task_wdt_reset();
       mqtt.publish("Translate/Status", status.c_str());
       Serial.println("Normally feeding");
+      ShowOled("Feeding....");
     }
     else
     {
       Serial.println("Not feeding waiting to reset");
+      ShowOled("Resetting....");
     }
   }
 }
