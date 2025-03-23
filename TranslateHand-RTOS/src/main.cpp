@@ -5,6 +5,7 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include <freertos/timers.h>
+#include <DFRobotDFPlayerMini.h>
 
 #define MQTT_SERVER "20.243.148.107"
 #define MQTT_PORT 1883
@@ -20,16 +21,82 @@
 
 #define EEPROM_SIZE 1024
 #define WDT_TIMEOUT 20
+#define MAX_WORD_LENGTH 32
 
 const char *ssid = "Iphone";
 const char *password = "tatty040347";
-volatile bool mqttConnected = false;
+volatile int words = 0;
 
+TaskHandle_t SoundOled = NULL;
 QueueHandle_t Data_Queue;
 QueueHandle_t Mailbox_status;
 TimerHandle_t Feeding_Mqtt_Watchdog_timer;
 WiFiClient client;
 PubSubClient mqtt(client);
+HardwareSerial mySerial(2);
+DFRobotDFPlayerMini myDFPlayer;
+
+void print_word(int count)
+{
+  for (int i = 0; i < count; i++)
+  {
+    String value = "";
+    if (xQueueReceive(Data_Queue, &value, 0) == pdTRUE)
+    {
+      Serial.print("Word[");
+      Serial.print(i);
+      Serial.print("]: ");
+      Serial.println(value);
+    }
+  }
+}
+void Feeding(TimerHandle_t xTimer)
+{
+  String status = "feed";
+  mqtt.publish("Translate/Status", status.c_str());
+  Serial.println("Feeding Watchdog and Mqtt");
+}
+void FeedingWatchdog()
+{
+  esp_task_wdt_reset();
+}
+void conllect_Queue(String word)
+{
+  if (xQueueSend(Data_Queue, &word, portMAX_DELAY) == pdPASS)
+  {
+    Serial.printf("Added word: %s", word.c_str());
+  }
+}
+void ExtractWord(String message)
+{
+  Serial.println("Extracting words from message");
+  int count = 0;
+  String word = "";
+
+  for (int i = 0; i <= message.length(); i++)
+  {
+    if (isUpperCase(message.charAt(i)) || i == message.length())
+    {
+      if (!word.isEmpty())
+      {
+        if (count < 100)
+        {
+          conllect_Queue(word);
+        }
+        else
+        {
+          Serial.println("Error: Word array overflow");
+          break;
+        }
+      }
+      word = String(message.charAt(i));
+    }
+    else
+    {
+      word += message.charAt(i);
+    }
+  }
+}
 
 void Callbackfunc(char *topic, byte *payload, unsigned int length)
 {
@@ -41,86 +108,59 @@ void Callbackfunc(char *topic, byte *payload, unsigned int length)
 
   bool StatusDone = false;
   xQueuePeek(Mailbox_status, &StatusDone, 0);
-  
-   if (topic_str == "Translate/ESP32/Word" && !StatusDone)
-   {
-     bool status = true;
-     Serial.println("[" + topic_str + "]: " + payload_str);
-     if (xQueueSend(Data_Queue, &payload_str, portMAX_DELAY) != pdPASS)
-     {
-       Serial.println("Failed to send message to queue");
-     }
-     else 
-     {
-       Serial.println("Message received and added to queue");
-       xQueueOverwrite(Mailbox_status, &status);  
-     }
-   }
-   else if (StatusDone)
-   {
-     Serial.println("System is busy processing previous data");
-   }
-}
-void Feeding(TimerHandle_t xTimer)
-{
-  String status = "feed";
-  esp_task_wdt_reset();
-  mqtt.publish("Translate/Status", status.c_str());
-  Serial.println("Feeding Watchdog and Mqtt");
-}
 
+  if (topic_str == "Translate/ESP32/Word" && !StatusDone)
+  {
+    Serial.println("[" + topic_str + "]: " + payload_str);
+    bool status = true;
+    ExtractWord(payload_str);
+    xQueueOverwrite(Mailbox_status, &status);
+  }
+  else if (topic_str == "Translate/Status" && payload_str == "feed")
+  {
+    FeedingWatchdog();
+  }
+  else if (StatusDone)
+  {
+    Serial.println("System is busy processing previous data");
+  }
+}
+void Sound_and_Oled(void *message)
+{
+  
+}
 void ControlPlane(void *pvParameters)
 {
-    int planetimer = 0;
-    bool status = false;
-    String message;
-    const int LOCK_PERIOD = 5000;
-    while (1)
+  int planetimer = 0;
+  bool status = false;
+  String message;
+  const int LOCK_PERIOD = 5000;
+  while (1)
+  {
+    if (xQueuePeek(Mailbox_status, &status, 0) == pdTRUE && status)
     {
-        
-      if (xQueuePeek(Mailbox_status, &status, 0) == pdTRUE && status)
-      {
-          if (xQueueReceive(Data_Queue, &message, 0) == pdTRUE)
-          {
-             
-              long long int lockTimer = millis();
-              
-              Serial.println("\n========================");
-              Serial.println("New data received!");
-              Serial.print("Message: ");
-              Serial.println(message);
-              Serial.println("System locked for 5 seconds");
-              Serial.println("========================\n");
 
-              while (millis() - lockTimer < LOCK_PERIOD)
-              {
-                  vTaskDelay(pdMS_TO_TICKS(100));
-              }
-              
-             
-              status = false;
-              xQueueOverwrite(Mailbox_status, &status);
-              Serial.println("System unlocked - Ready for new data");
-          }
-      }
+      xTaskCreate(Sound_and_Oled,"ProcessData",4096,NULL,1,&SoundOled);
+      vTaskDelay(pdMS_TO_TICKS(5000));
 
-        // ตรวจสอบ timer
-        long long int realtime = millis();
-        if (realtime - planetimer >= 5000)
-        {
-            planetimer = realtime;
-            Serial.println("Control Plane : Get command");
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
+      status = false;
+      xQueueOverwrite(Mailbox_status, &status);
+      Serial.println("System unlocked - Ready for new data");
     }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
 }
 
 void setup()
 {
   Serial.begin(115200);
   delay(2000);
+
+  esp_task_wdt_deinit();
   esp_task_wdt_init(WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+
+  mySerial.begin(9600, SERIAL_8N1, RXD2, TXD2);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
   {
@@ -132,8 +172,8 @@ void setup()
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   mqtt.setCallback(Callbackfunc);
 
-  Data_Queue = xQueueCreate(10, sizeof(String));
-  Mailbox_status = xQueueCreate(1, sizeof(bool));  
+  Data_Queue = xQueueCreate(100, MAX_WORD_LENGTH);
+  Mailbox_status = xQueueCreate(1, sizeof(bool));
 
   bool initial_status = false;
   xQueueOverwrite(Mailbox_status, &initial_status);
